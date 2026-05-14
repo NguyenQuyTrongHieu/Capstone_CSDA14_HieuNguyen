@@ -137,15 +137,16 @@ elif Trang_chu == 'Active Member':
             daily_case = (member_final.groupby(member_final["Filter Date"].dt.date)["CaseID"].count())
 
             st.line_chart(daily_case)
-
+            
             # WORKING HOURS
-            fig, ax = plt.subplots(figsize=(2,2))
+            total_case = (len(completed_df) + len(open_df) + len(invalid_df))
+            if total_case > 0:
+                fig, ax = plt.subplots(figsize=(2,2))
+                ax.pie([len(completed_df),len(open_df),len(invalid_df)],labels=["Completed","Opening","Invalid"],autopct='%1.1f%%')
 
-            ax.pie([len(completed_df),len(open_df),len(invalid_df)],labels=["Completed","Opening","Invalid"],autopct='%1.1f%%')
+                ax.set_title(f"{selected_member} Case Status")
 
-            ax.set_title(f"{selected_member} Case Status")
-
-            st.pyplot(fig)
+                st.pyplot(fig)
 
             # INVALID CASES
 
