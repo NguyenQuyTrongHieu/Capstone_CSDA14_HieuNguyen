@@ -12,14 +12,16 @@ st.title('Task Performance Dashboard', text_alignment='center')
 
 with st.sidebar:
 
-    upload_file = st.file_uploader(
-        "Upload Excel File",
-        type=["xlsx"]
-    )
-    if upload_file:
-        st.success("File uploaded successfully")
+    upload_file = st.file_uploader("Upload Excel File",type=["xlsx"])
 
-df = data_source(upload_file)
+    if upload_file:
+        df, missing_columns = data_source(upload_file)
+        if missing_columns:
+            st.error(f'thiếu cột: {missing_columns}')
+            st.stop()
+        else:
+            st.success("File upload successfully")
+
 
 if upload_file is None:
     st.sidebar.warning("Please upload file")
@@ -28,7 +30,7 @@ if df is None:
     st.info("File chưa được upload")
     st.stop()
 
-Trang_chu = st.sidebar.radio('Tuỳ chỉnh', ['Trang chủ','Active Member'])
+Trang_chu = st.sidebar.radio('', ['Trang chủ','Active Member'])
 
 if Trang_chu == 'Trang chủ':
     start_date = st.date_input("From Date",min_value=date(2025,1,1),max_value=datetime.today())
@@ -64,14 +66,19 @@ if Trang_chu == 'Trang chủ':
     st.pyplot(fig)
     
 elif Trang_chu == 'Active Member':
+    df_Data_Member = pd.read_excel(upload_file,sheet_name= 'Member Data')
     member_list = df['Mapping Team'].unique().tolist()
 
     selected_member = st.sidebar.selectbox("Select Member",options=member_list,
-        index=None,
-        placeholder="Type member name..."
-    )   
+        index=None,placeholder="Type member name...")   
 
     if selected_member:
+        info = df_Data_Member[df_Data_Member["Tên"] == selected_member].iloc[0]
+        
+        st.sidebar.write(f'Title: {info['Title']}')
+        st.sidebar.write(f'Shift: {info['Shift']}')
+        st.sidebar.write(f'Level: {info['Level']}')
+
         member_df = df[df["Mapping Team"] == selected_member]
         start_date = st.date_input("From Date",min_value=date(2025,1,1),max_value=datetime.today())
         end_date = st.date_input("To Date",min_value=date(2025,1,1),max_value=datetime.today())
@@ -81,10 +88,11 @@ elif Trang_chu == 'Active Member':
         completed_df = completed_df[(completed_df["Filter Date"].dt.date >= start_date) & ( completed_df["Filter Date"].dt.date <= end_date)]
         open_df = open_df[(open_df["Filter Date"].dt.date >= start_date) &(open_df["Filter Date"].dt.date <= end_date)]
         invalid_df = invalid_df[(invalid_df["Filter Date"].dt.date >= start_date) & (invalid_df["Filter Date"].dt.date <= end_date)]
+        Full_Case = member_df[(member_df["Date Created"].dt.date >= start_date) & (member_df["Date Created"].dt.date <= end_date)]
         st.title(selected_member)
 
         member_final = pd.concat([completed_df,open_df,invalid_df])
-        tab1, tab2, tab3 = st.tabs(["Overview","Charts","Raw Data"])
+        tab1, tab2, tab3 = st.tabs(["Overview","KPI","Raw Data"])
         
         with tab1:
             # KPI
@@ -115,21 +123,6 @@ elif Trang_chu == 'Active Member':
             st.subheader("Opening Cases")
 
             st.dataframe(open_df.sort_values("Pending Hours",ascending=False))
-        with tab2:
-
-            # STATUS OVERVIEW
-            st.subheader("Case Status Overview")
-
-            status_df = pd.DataFrame({"Count": [len(completed_df),len(open_df),len(invalid_df)]}, index=["Completed","Opening","Invalid"])
-
-            st.bar_chart(status_df)
-
-            # TOP LONGEST CASE
-            st.subheader("Top Longest Cases")
-
-            longest_chart = top_cases[["CaseID", "Working Hours"]].set_index("CaseID")
-
-            st.bar_chart(longest_chart)
 
             # DAILY CASE TREND
             st.subheader("Daily Case Trend")
@@ -137,24 +130,53 @@ elif Trang_chu == 'Active Member':
             daily_case = (member_final.groupby(member_final["Filter Date"].dt.date)["CaseID"].count())
 
             st.line_chart(daily_case)
+
+        with tab2:
+            col1, col2, col3 = st.columns(3)
+
+            col1.metric("Completed Cases",len(completed_df))
+
+            col2.metric("Opening Cases",len(open_df))
+
+            col3.metric("Invalid Cases",len(invalid_df))
+            # FROM KPI
+            level = info['Level']
+            kpi_level = KPI.get(level,[])
+            with st.form("KPI_Form"):
+                score = {}
+                for idx, kpi in enumerate(kpi_level, start = 1):
+                    st.subheader(f"KPI {idx}: {kpi["Name"]}")
+                    with st.popover("Xem chi tiết"):
+                        st.write(kpi["Detail"])
+                    score[kpi["Name"]] = st.number_input("Level", min_value=0, max_value=5,step=1,key=f"kpi_{idx}")
+                submit = st.form_submit_button("Submit")
             
-            # WORKING HOURS
-            total_case = (len(completed_df) + len(open_df) + len(invalid_df))
-            if total_case > 0:
-                fig, ax = plt.subplots(figsize=(2,2))
-                ax.pie([len(completed_df),len(open_df),len(invalid_df)],labels=["Completed","Opening","Invalid"],autopct='%1.1f%%')
+            if submit:
+                df_kpis = pd.DataFrame({"KPI": list(score.keys()),"Điểm": list(score.values()) })
+                total_score = df_kpis["Điểm"].sum()
+                avg_score = total_score / len(df_kpis)
 
-                ax.set_title(f"{selected_member} Case Status")
+                xep_loai = rank(avg_score)
 
-                st.pyplot(fig)
+                st.success("Đánh giá hoàn tất")
 
-            # INVALID CASES
+                st.dataframe(df_kpis, use_container_width= True)
+
+                col4, col5, col6 = st.columns(3)
+                col4.metric("Tổng điểm", round(total_score, 2))
+                col5.metric("Điểm Trung Bình", round(avg_score, 2))
+                col6.metric("Xếp loại", xep_loai)
+
+                chart_df = df_kpis.set_index("KPI")
+
+                st.bar_chart(chart_df["Điểm"])
 
         with tab3:
+            # RAW DATA
 
-            st.subheader("Completed Cases")
+            st.subheader("Full Cases")
 
-            st.dataframe(completed_df)
+            st.dataframe(Full_Case)
 
             st.subheader("Opening Cases")
 
